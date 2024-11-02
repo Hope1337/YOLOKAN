@@ -1,6 +1,7 @@
 import math
 
 import torch
+import torch.nn as nn
 
 def make_anchors(x, strides, offset=0.5):
     """
@@ -26,7 +27,7 @@ def pad(k, p=None, d=1):
 
 
 class Conv(torch.nn.Module):
-    def __init__(self, conv, in_ch, out_ch, k=1, s=1, p=None, d=1, g=1, bn=0, act=0):
+    def __init__(self, conv, in_ch, out_ch, k=1, s=1, p=None, d=1, g=1, bn=1, act=1):
         super().__init__()
         self.bn   = bn
         self.act  = act
@@ -209,49 +210,69 @@ class Head(torch.nn.Module):
 
 
 class YOLO(torch.nn.Module):
-    def __init__(self, conv, width, depth, num_classes):
+    def __init__(self, conv, width, depth, num_classes, pretrain_path=None):
         super().__init__()
         self.net = DarkNet(conv, width, depth)
         self.fpn = DarkFPN(conv, width, depth)
 
         img_dummy = torch.zeros(1, 3, 256, 256)
-        self.head = Head(conv, num_classes, (width[3], width[4], width[5]))
+        self.head = Head(nn.Conv2d, num_classes, (width[3], width[4], width[5]))
         self.head.stride = torch.tensor([256 / x.shape[-2] for x in self.forward(img_dummy)])
         self.stride = self.head.stride
         self.head.initialize_biases()
+        self.pretrain_path = pretrain_path
 
     def forward(self, x):
         x = self.net(x)
         x = self.fpn(x)
         return self.head(list(x))
+    
+    def load_pretrain(self):
+        if self.load_pretrain is None:
+            return
+
+        state_dict = self.state_dict()
+
+        pretrain_state_dict = torch.load(self.pretrain_path, weights_only=True)
+        
+        for param_name, value in pretrain_state_dict.items():
+            #print(param_name)
+            if param_name not in state_dict:
+                print(param_name)
+                continue
+            state_dict[param_name] = value
+            
+        self.load_state_dict(state_dict)
+
+        print("backbone2D : YOLOv8 pretrained loaded!", flush=True)
 
 
 
-def yolo_v8_n(conv, num_classes: int = 80):
+def yolo_v8_n(conv, num_classes: int = 80, pretrain_path=None):
     depth = [1, 2, 2]
     width = [3, 16, 32, 64, 128, 256]
-    return YOLO(conv, width, depth, num_classes)
+    return YOLO(conv, width, depth, num_classes, pretrain_path=pretrain_path)
 
 
-def yolo_v8_s(conv, num_classes: int = 80):
+def yolo_v8_s(conv, num_classes: int = 80, pretrain_path=None):
     depth = [1, 2, 2]
     width = [3, 32, 64, 128, 256, 512]
-    return YOLO(conv ,width, depth, num_classes)
+    return YOLO(conv ,width, depth, num_classes, pretrain_path=pretrain_path)
 
 
-def yolo_v8_m(conv, num_classes: int = 80):
+def yolo_v8_m(conv, num_classes: int = 80, pretrain_path=None):
     depth = [2, 4, 4]
     width = [3, 48, 96, 192, 384, 576]
-    return YOLO(conv, width, depth, num_classes)
+    return YOLO(conv, width, depth, num_classes, pretrain_path=pretrain_path)
 
 
-def yolo_v8_l(conv, num_classes: int = 80):
+def yolo_v8_l(conv, num_classes: int = 80, pretrain_path=None):
     depth = [3, 6, 6]
     width = [3, 64, 128, 256, 512, 512]
-    return YOLO(conv, width, depth, num_classes)
+    return YOLO(conv, width, depth, num_classes, pretrain_path=pretrain_path)
 
 
-def yolo_v8_x(conv, num_classes: int = 80):
+def yolo_v8_x(conv, num_classes: int = 80, pretrain_path=None):
     depth = [3, 6, 6]
     width = [3, 80, 160, 320, 640, 640]
-    return YOLO(conv, width, depth, num_classes)
+    return YOLO(conv, width, depth, num_classes, pretrain_path=pretrain_path)

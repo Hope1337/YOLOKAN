@@ -14,6 +14,7 @@ from utils import util
 from models import yolo_v8_x, yolo_v8_s, yolo_v8_l, yolo_v8_m, yolo_v8_n
 from datasets import COCODataset
 from kan_convs import KANConv2DLayer
+from custom import CosineConv2D                                                                                                                                                                                                                                                                        
 
 
 warnings.filterwarnings("ignore")
@@ -28,34 +29,31 @@ def learning_rate(args, params):
 
 def train(args, params):
     # Model
-    model = yolo_v8_m(KANConv2DLayer, len(params['names'].values())).cuda()
+    #model = yolo_v8_m(KANConv2DLayer, len(params['names'].values())).cuda()
     #model = yolo_v8_m(torch.nn.Conv2d, len(params['names'].values())).cuda()
+    model = yolo_v8_m(CosineConv2D, len(params['names'].values())).cuda()
+    
 
     # Optimizer
     accumulate = max(round(64 / (args.batch_size * args.world_size)), 1)
     params['weight_decay'] *= args.batch_size * args.world_size * accumulate / 64
 
-    #p = [], [], []
-    #for v in model.modules():
-        #if hasattr(v, 'bias') and isinstance(v.bias, torch.nn.Parameter):
-            #p[2].append(v.bias)
-        #if isinstance(v, torch.nn.BatchNorm2d):
-            #p[1].append(v.weight)
-        #elif hasattr(v, 'weight') and isinstance(v.weight, torch.nn.Parameter):
-            #p[0].append(v.weight)
+    p = [], [], []
+    for v in model.modules():
+        if hasattr(v, 'bias') and isinstance(v.bias, torch.nn.Parameter):
+            p[2].append(v.bias)
+        if isinstance(v, torch.nn.BatchNorm2d):
+            p[1].append(v.weight)
+        elif hasattr(v, 'weight') and isinstance(v.weight, torch.nn.Parameter):
+            p[0].append(v.weight)
 
-    #optimizer = torch.optim.SGD()
+    optimizer = torch.optim.SGD(p[2], params['lr0'], params['momentum'], nesterov=True)
 
-    #if len(p[2]) != 0:
-        #optimizer.add_param_group(p[2], params['lr0'], params['momentum'], nesterov=True)
+    optimizer.add_param_group({'params': p[0], 'weight_decay': params['weight_decay']})
+    optimizer.add_param_group({'params': p[1]})
+    del p
 
-    #if len(p[0]) != 0:
-        #optimizer.add_param_group({'params': p[0], 'weight_decay': params['weight_decay']})
-
-    #if len(p[1]) != 0:
-        #optimizer.add_param_group({'params': p[1]})
-
-    optimizer = torch.optim.AdamW(model.parameters(), lr=params['lr0'])
+    #optimizer = torch.optim.AdamW(model.parameters(), lr=params['lr0'])
 
     # Scheduler
     lr = learning_rate(args, params)
@@ -86,7 +84,7 @@ def train(args, params):
         model = torch.nn.parallel.DistributedDataParallel(module=model,
                                                           device_ids=[args.local_rank],
                                                           output_device=args.local_rank)
-
+    
     # Start training
     best = 0
     num_batch = len(loader)
@@ -150,6 +148,8 @@ def train(args, params):
 
                 # Optimize
                 if x % accumulate == 0:
+                    #print(model.net.p1[0].conv.conv.weight)
+                    #sys.exit()
                     #amp_scale.unscale_(optimizer)  # unscale gradients
                     util.clip_gradients(model)  # clip gradients
                     optimizer.step()
@@ -158,6 +158,9 @@ def train(args, params):
                     optimizer.zero_grad()
                     if ema:
                         ema.update(model)
+                    #print(model.net.p1[0].conv.conv.weight)
+                    #sys.exit()
+                    
 
                 # Log
                 if args.local_rank == 0:
@@ -297,8 +300,8 @@ def test(args, params, model=None):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--input-size', default=224, type=int)
-    parser.add_argument('--batch-size', default=6, type=int)
+    parser.add_argument('--input-size', default=640, type=int)
+    parser.add_argument('--batch-size', default=16, type=int)
     parser.add_argument('--local_rank', default=0, type=int)
     parser.add_argument('--epochs', default=500, type=int)
     parser.add_argument('--train', action='store_true')
@@ -315,7 +318,7 @@ def main():
 
     if args.local_rank == 0:
         if not os.path.exists('weights'):
-            os.makedirs('weights')
+            os.makedirs('weights')        
 
     util.setup_seed()
     util.setup_multi_processes()

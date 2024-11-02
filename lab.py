@@ -2,12 +2,12 @@ from kan_convs import KANConv2DLayer
 from utils.lib import *
 from models import yolo_v8_x, yolo_v8_s, yolo_v8_l, yolo_v8_m, yolo_v8_n
 from utils.measure import time_run
+from custom import CosineConv2D
+
+pretrain_path = 'weights/v8_m.pth'
+model         = yolo_v8_m(CosineConv2D, 80, pretrain_path=pretrain_path)
+images        = torch.randn(8, 3, 640, 640)
+model.load_pretrain()
 
 
-model1  = yolo_v8_m(KANConv2DLayer, 80)
-model2  = yolo_v8_m(torch.nn.Conv2d, 80)
-images = torch.randn(8, 3, 640, 640)
-
-print(time_run(model2, images))
-print(time_run(model1, images))
-
+print(model.net.p1[0].conv.weight.shape)
